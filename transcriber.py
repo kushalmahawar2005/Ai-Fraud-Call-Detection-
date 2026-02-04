@@ -1,7 +1,8 @@
 import os
-import shutil
 import whisper
 import warnings
+import librosa
+import numpy as np
 
 # Suppress warnings to keep the output clean
 warnings.filterwarnings("ignore")
@@ -23,37 +24,27 @@ class Transcriber:
 
     def transcribe(self, audio_path):
         """
-        Transcribes the audio file at audio_path.
+        Transcribes the audio file using librosa for loading to avoid FFmpeg dependency.
         Returns the transcribed text string.
         """
         if self.model is None:
             return "Error: Model not loaded."
 
-        # 0. Add local bin to PATH (for portable FFmpeg)
-        import os
-        bin_path = os.path.join(os.getcwd(), "bin")
-        if os.path.exists(bin_path):
-            os.environ["PATH"] += os.pathsep + bin_path
-
-        # 1. Check if FFmpeg is installed
-        if not shutil.which("ffmpeg"):
-            return (
-                "Error: FFmpeg is not installed or not in PATH.\n\n"
-                "Please download FFmpeg from https://ffmpeg.org/download.html, "
-                "extract it, and add the 'bin' folder to your System PATH."
-            )
-
-        # 2. Check if file exists
+        # Check if file exists
         if not os.path.exists(audio_path):
             return f"Error: File not found at {audio_path}"
 
         try:
-            # Make path absolute to avoid WinError 2
-            abs_path = os.path.abspath(audio_path)
+            # 1. Load and resample audio using librosa
+            # This uses soundfile/audioread internally and returns a numpy array
+            # We enforce 16kHz mono (required by Whisper)
+            audio_array, _ = librosa.load(audio_path, sr=16000, mono=True)
 
-            # The transcribe function automatically detects language (English/Hindi)
-            # fp16=False is recommended for CPU usage to avoid warnings
-            result = self.model.transcribe(abs_path, fp16=False)
+            # 2. Pass the numpy array directly to Whisper
+            # Passing the array bypasses Whisper's internal 'ffmpeg -i' command usage
+            # fp16=False is recommended for CPU usage
+            result = self.model.transcribe(audio_array, fp16=False)
             return result["text"]
+            
         except Exception as e:
             return f"Error during transcription: {str(e)}"
